@@ -6,3 +6,18 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# generated data (re-create with: python model/simulator.py)
+data/synthetic/full/
+
+# python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.venv/
+venv/
+
+# editors
+Thumbs.db
+.vscode/
+.idea/
