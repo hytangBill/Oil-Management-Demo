@@ -1,0 +1,171 @@
+---
+name: Commercial Kitchen Oil Assistant
+colors:
+  surface: '#fff9ef'
+  surface-dim: '#dfd9d0'
+  surface-bright: '#fff9ef'
+  surface-container-lowest: '#ffffff'
+  surface-container-low: '#f9f3e9'
+  surface-container: '#f3ede3'
+  surface-container-high: '#ede7de'
+  surface-container-highest: '#e7e2d8'
+  on-surface: '#1d1b16'
+  on-surface-variant: '#5d403a'
+  inverse-surface: '#32302a'
+  inverse-on-surface: '#f6f0e6'
+  outline: '#926f68'
+  outline-variant: '#e7bdb5'
+  surface-tint: '#b91d00'
+  primary: '#a91a00'
+  on-primary: '#ffffff'
+  primary-container: '#d62300'
+  on-primary-container: '#ffeeea'
+  inverse-primary: '#ffb4a5'
+  secondary: '#775a00'
+  on-secondary: '#ffffff'
+  secondary-container: '#ffc72c'
+  on-secondary-container: '#6f5400'
+  tertiary: '#a81d01'
+  on-tertiary: '#ffffff'
+  tertiary-container: '#cb371a'
+  on-tertiary-container: '#ffeeea'
+  error: '#ba1a1a'
+  on-error: '#ffffff'
+  error-container: '#ffdad6'
+  on-error-container: '#93000a'
+  primary-fixed: '#ffdad3'
+  primary-fixed-dim: '#ffb4a5'
+  on-primary-fixed: '#3e0400'
+  on-primary-fixed-variant: '#8e1400'
+  secondary-fixed: '#ffdf99'
+  secondary-fixed-dim: '#f6bf22'
+  on-secondary-fixed: '#251a00'
+  on-secondary-fixed-variant: '#5a4300'
+  tertiary-fixed: '#ffdad3'
+  tertiary-fixed-dim: '#ffb4a4'
+  on-tertiary-fixed: '#3e0500'
+  on-tertiary-fixed-variant: '#8d1500'
+  background: '#fff9ef'
+  on-background: '#1d1b16'
+  surface-variant: '#e7e2d8'
+  accent-soft: '#FFE8A3'
+  background-cream: '#FFF8E7'
+  surface-white: '#FFFFFF'
+  text-charcoal: '#27251F'
+  text-muted: '#6B6459'
+  status-green: '#2E9E5B'
+  status-amber: '#F28C00'
+  status-red: '#C8102E'
+typography:
+  display-lg:
+    fontFamily: Plus Jakarta Sans
+    fontSize: 56px
+    fontWeight: '800'
+    lineHeight: 64px
+    letterSpacing: -0.02em
+  display-md:
+    fontFamily: Plus Jakarta Sans
+    fontSize: 44px
+    fontWeight: '700'
+    lineHeight: 52px
+    letterSpacing: -0.01em
+  metric-xl:
+    fontFamily: Inter
+    fontSize: 48px
+    fontWeight: '800'
+    lineHeight: 52px
+    letterSpacing: -0.02em
+  metric-lg:
+    fontFamily: Inter
+    fontSize: 36px
+    fontWeight: '700'
+    lineHeight: 40px
+    letterSpacing: -0.01em
+  headline-lg:
+    fontFamily: Plus Jakarta Sans
+    fontSize: 32px
+    fontWeight: '700'
+    lineHeight: 40px
+  headline-md:
+    fontFamily: Plus Jakarta Sans
+    fontSize: 24px
+    fontWeight: '700'
+    lineHeight: 32px
+  headline-sm:
+    fontFamily: Plus Jakarta Sans
+    fontSize: 20px
+    fontWeight: '600'
+    lineHeight: 28px
+  body-lg:
+    fontFamily: Inter
+    fontSize: 18px
+    fontWeight: '500'
+    lineHeight: 26px
+  body-md:
+    fontFamily: Inter
+    fontSize: 16px
+    fontWeight: '400'
+    lineHeight: 24px
+  body-sm:
+    fontFamily: Inter
+    fontSize: 14px
+    fontWeight: '500'
+    lineHeight: 20px
+  label-lg:
+    fontFamily: Inter
+    fontSize: 16px
+    fontWeight: '700'
+    lineHeight: 20px
+    letterSpacing: 0.02em
+  label-md:
+    fontFamily: Inter
+    fontSize: 14px
+    fontWeight: '600'
+    lineHeight: 18px
+    letterSpacing: 0.04em
+  label-sm:
+    fontFamily: Inter
+    fontSize: 12px
+    fontWeight: '700'
+    lineHeight: 16px
+    letterSpacing: 0.06em
+rounded:
+  sm: 0.25rem
+  DEFAULT: 0.5rem
+  md: 0.75rem
+  lg: 1rem
+  xl: 1.5rem
+  full: 9999px
+spacing:
+  gutter: 1rem
+  gutter-lg: 1.5rem
+  margin: 1.5rem
+  margin-tablet: 1.5rem
+  space-xs: 0.5rem
+  space-sm: 0.75rem
+  space-md: 1rem
+  space-lg: 1.5rem
+  space-xl: 2rem
+  space-2xl: 3rem
+---
+
+# FryWise Design System
+
+## Brand Identity & Style
+- Brand: FryWise â€” Tablet assistant for quick-service commercial kitchens predicting frying-oil quality (TPM %).
+- Device: Landscape tablet (1280x800), high contrast, touch targets HMœ™XYX›Hœ›ÛHHY]\ˆ]Ø^K‚‹H[ÛÙˆØ\›K[™\™Ù]XËÛX[ˆÚ]Ú[‹Y\Ü^HRHÚ]›İ[™YMœØ\™È[™ÛÙÚYİÜË‚‹HX[™]ÜH˜[›™\ˆSSÈSÑS8 %STÕUU‘HTSQUT”È8 %“Õ“Ôˆ“ÓÑTĞQ‘UHPÒTÒSÓ”Ø‹HÛÛœİ˜Z[Îˆ›ÈXÑÛ˜[	ÜÈÙÛÜËÛÛ[ˆ\˜Ú\ËX\ØÛİËÜˆ™X[™\İ]\˜[\ÜÙ]ËˆÛX[ˆ›]™XİÜˆXÛÛœÈÛ›K‚‚ˆÈÈÛÛÜˆ[]B‹Hš[X\H
+œH™Y
+NˆÑŒŒÌ‹Hš[X\H\šÈ
+Y\™Y
+NˆĞMŒPŒ‹HXØÙ[
+ÛÛ[ˆY[İÊNˆÑ‘ÍÌØ‹HXØÙ[ÛÙ
+]\ŠNˆÑ‘‘NLØ‹H˜XÚÙÜ›İ[™
+Ü™X[JNˆÑ‘‘MØ‹Hİ\™˜XÙH
+Ø\™ÊNˆÑ‘‘‘‘‘˜‹H^
+Ú\˜ÛØ[
+NˆÌÌLQ˜‹H]]Y^
+Ø\›HÜ™^JNˆÍNX‚ˆÈÈÈİ]\ÈÛÛÜœÈ
+Ú[]X[]HJB‹HÜ™Y[ˆ
+Ú][ˆ[Z]ÈŒIJNˆÌ‘NQMP˜‹H[X™\ˆ
+\›ØXÚ[™È[Z]ŒKL	JNˆÑŒÌ‹H™Y
+]Û™X\ˆ[Z]L	JNˆĞÎL‘XÚ][Ú[™Èİ][™B‚ˆÈÈ\ÙÜ˜\B‹H›Û˜[Z[NˆÜ[œË[\‹Ø[œË\Ù\šY‚‹HXY[™ÜÎˆ›ÛÛX[‹YÚš\ÚXš[]B‹H[X™\œÈÈHÈ[YNˆ›ÛX[\ˆšYİ\™\Â

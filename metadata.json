@@ -1,0 +1,6 @@
+{
+  "name": "FryWise",
+  "description": "Commercial kitchen tablet assistant for predicting frying-oil TPM quality and scheduling vat maintenance.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
