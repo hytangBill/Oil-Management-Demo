@@ -1,0 +1,17 @@
+sku,product_name,fryer_family,fried_g_per_unit,stress_weight,basis,source_note
+fries_s,Franse Frietjes Klein,fries,80,1.0,portion,Published portion weight (third-party nutrition database); whole portion is fried
+fries_m,Franse Frietjes Medium,fries,114,1.0,portion,Published portion weight (third-party nutrition database); whole portion is fried
+fries_l,Franse Frietjes Groot,fries,150,1.0,portion,Published portion weight (third-party nutrition database); whole portion is fried
+nuggets_6,Chicken McNuggets 6,chicken,109,1.3,portion,Published portion weight (third-party nutrition database); whole portion is fried
+nuggets_9,Chicken McNuggets 9,chicken,163,1.3,portion,Published portion weight (third-party nutrition database); whole portion is fried
+nuggets_20,Chicken McNuggets 20,chicken,362,1.3,portion,Published portion weight (third-party nutrition database); whole portion is fried
+mcchicken,McChicken,chicken,90,1.3,estimate,Fried patty weight not published; illustrative estimate
+mccrispy,McCrispy,chicken,120,1.4,estimate,Fried patty weight not published; illustrative estimate
+chili_chicken,Chili Chicken,chicken,60,1.3,estimate,Fried patty weight not published; illustrative estimate
+mckroket,McKroket,chicken,100,1.5,estimate,Fried croquette weight not published; illustrative estimate; vat routing to be confirmed
+filet_o_fish,Filet-O-Fish,chicken,55,1.2,estimate,Fried fish weight not published; illustrative estimate; vat routing to be confirmed
+big_mac,Big Mac,,0,0.0,grill,Beef patties cooked on grill; no fryer load
+quarter_pounder,Quarter Pounder,,0,0.0,grill,Beef patty cooked on grill; no fryer load
+hamburger,Hamburger,,0,0.0,grill,Beef patty cooked on grill; no fryer load
+cheeseburger,Cheeseburger,,0,0.0,grill,Beef patty cooked on grill; no fryer load
+double_cheeseburger,Double Cheeseburger,,0,0.0,grill,Beef patties cooked on grill; no fryer load

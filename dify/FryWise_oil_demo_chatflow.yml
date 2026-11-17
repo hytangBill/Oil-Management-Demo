@@ -1,0 +1,1344 @@
+app:
+  name: FryWise – Frying-Oil Demo
+  mode: advanced-chat
+  icon: 🍟
+  icon_background: '#FFEAD5'
+  use_icon_as_answer_icon: false
+  description: 'Button-only POS demo: recipe parser → TPM model → policy & optimizer → LLM explanation. DEMO MODEL with illustrative parameters; not for food-safety decisions.'
+dependencies: []
+kind: app
+version: 0.3.0
+workflow:
+  conversation_variables:
+  - id: 5d1b0df3-29b4-465b-8e9f-619ae2cc75a7
+    name: state
+    selector:
+    - conversation
+    - state
+    value_type: string
+    value: '{}'
+    description: 'Demo state: simulated clock, cart, TPM per vat, filter effect'
+  environment_variables: []
+  features:
+    opening_statement: |-
+      👋 **FryWise frying-oil demo**
+
+      Tap a time slot below to start. Both vats start at 18 % TPM. Ordering works with buttons only.
+
+      *Demo model — illustrative parameters — not for food-safety or live operational decisions.*
+    suggested_questions:
+    - TIME:12:00 Lunch peak
+    - TIME:15:00 Afternoon quiet
+    - TIME:18:00 Dinner peak
+    - TIME:21:30 Late evening
+    suggested_questions_after_answer:
+      enabled: false
+    speech_to_text:
+      enabled: false
+    text_to_speech:
+      enabled: false
+      language: ''
+      voice: ''
+    retriever_resource:
+      enabled: false
+    sensitive_word_avoidance:
+      enabled: false
+    file_upload:
+      enabled: false
+      image:
+        enabled: false
+        number_limits: 3
+        transfer_methods:
+        - local_file
+        - remote_url
+  graph:
+    nodes:
+    - data:
+        desc: ''
+        selected: false
+        title: Start
+        type: start
+        variables: []
+      height: 54
+      id: '1700000000001'
+      position:
+        x: 30
+        y: 300
+      positionAbsolute:
+        x: 30
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        desc: ''
+        selected: false
+        title: State, cart & menu (buttons only)
+        type: code
+        code_language: python3
+        code: |
+          import json
+          import re
+
+          # ===== DEMO CONFIG (illustrative values, not operator-approved) =====
+          INITIAL_TPM = {"F1": 18.0, "C1": 18.0}   # % TPM at session start
+          FRESH_TPM = 5.0                           # % TPM of fresh oil
+          VAT_VOLUME_L = {"F1": 15.0, "C1": 15.0}
+          WARN_TPM = 21.0                           # display colours only; policy lives in node 3
+          LIMIT_TPM = 24.0
+          MIN_ITEMS = 5
+          MAX_ITEMS = 40
+          OPEN_MIN = 7 * 60                         # store opens 07:00
+          LAST_SLOT_MIN = 23 * 60 + 45              # last 15-min slot starts 23:45
+
+          MENU = [
+              ("🍟 Fries", [
+                  ("fries_s", "Franse Frietjes Klein"),
+                  ("fries_m", "Franse Frietjes Medium"),
+                  ("fries_l", "Franse Frietjes Groot"),
+              ]),
+              ("🍗 Chicken, fish & snacks", [
+                  ("nuggets_6", "Chicken McNuggets 6"),
+                  ("nuggets_9", "Chicken McNuggets 9"),
+                  ("nuggets_20", "Chicken McNuggets 20"),
+                  ("mcchicken", "McChicken"),
+                  ("mccrispy", "McCrispy"),
+                  ("chili_chicken", "Chili Chicken"),
+                  ("mckroket", "McKroket"),
+                  ("filet_o_fish", "Filet-O-Fish"),
+              ]),
+              ("🍔 Beef burgers", [
+                  ("big_mac", "Big Mac"),
+                  ("quarter_pounder", "Quarter Pounder"),
+                  ("hamburger", "Hamburger"),
+                  ("cheeseburger", "Cheeseburger"),
+                  ("double_cheeseburger", "Double Cheeseburger"),
+              ]),
+          ]
+          NAMES = {sku: name for _, items in MENU for sku, name in items}
+          VAT_NAME = {"F1": "Fries vat F1", "C1": "Chicken vat C1"}
+          TIME_SLOTS = [("07:30", "Breakfast"), ("12:00", "Lunch peak"), ("15:00", "Afternoon quiet"),
+                        ("18:00", "Dinner peak"), ("21:30", "Late evening")]
+
+
+          def fmt_clock(t):
+              day = t // 1440 + 1
+              m = t % 1440
+              return "Day %d · %02d:%02d" % (day, m // 60, m % 60)
+
+
+          def dot(tpm):
+              if tpm >= LIMIT_TPM:
+                  return "🔴"
+              if tpm >= WARN_TPM:
+                  return "🟠"
+              return "🟢"
+
+
+          def status_bar(s):
+              f = s["vats"]["F1"]["tpm"]
+              c = s["vats"]["C1"]["tpm"]
+              return ("> 🕐 **%s**　｜　%s F1 Fries **%.1f %%**　｜　%s C1 Chicken **%.1f %%**\n>\n"
+                      "> *DEMO MODEL — ILLUSTRATIVE PARAMETERS — NOT FOR FOOD-SAFETY OR LIVE OPERATIONAL DECISIONS*\n"
+                      % (fmt_clock(s["clock"]), dot(f), f, dot(c), c))
+
+
+          def btn(msg, label, variant="secondary"):
+              return '<button data-message="%s" data-variant="%s">%s</button>' % (msg, variant, label)
+
+
+          def new_state():
+              return {
+                  "started": False,
+                  "clock": 12 * 60,
+                  "cart": {},
+                  "vats": {v: {"tpm": INITIAL_TPM[v], "filter_blocks_left": 0} for v in INITIAL_TPM},
+                  "orders_submitted": 0,
+              }
+
+
+          def mix(tpm, add_l, vol):
+              return (tpm * (vol - add_l) + FRESH_TPM * add_l) / vol
+
+
+          def render_start(s, note):
+              out = status_bar(s) + "\n"
+              if note:
+                  out += note + "\n\n"
+              out += "### 🕐 Choose the time slot to simulate\n\n"
+              out += " ".join(btn("TIME:" + t, "%s · %s" % (t, lbl), "primary") for t, lbl in TIME_SLOTS) + "\n"
+              return out
+
+
+          def render_menu(s, note):
+              cart = s["cart"]
+              n = sum(cart.values())
+              out = status_bar(s) + "\n"
+              if note:
+                  out += note + "\n\n"
+              out += "### 🧾 Order for slot %s – %s\n\n" % (fmt_clock(s["clock"]), fmt_clock(s["clock"] + 15)[-5:])
+              for title, items in MENU:
+                  out += "**%s**\n\n" % title
+                  out += " ".join(btn("ADD:" + sku, "+ " + name) for sku, name in items) + "\n\n"
+              out += "**🛒 Cart (%d item%s)**\n\n" % (n, "" if n == 1 else "s")
+              if n == 0:
+                  out += "*Empty — tap the buttons above.*\n\n"
+              else:
+                  for sku, q in cart.items():
+                      out += "- %d × %s\n" % (q, NAMES[sku])
+                  out += "\n" + " ".join(btn("DEL:" + sku, "− " + NAMES[sku], "ghost") for sku in cart) + "\n\n"
+              if n >= MIN_ITEMS:
+                  out += btn("SUBMIT", "✅ Submit order (%d items)" % n, "primary") + " " + btn("CLEAR", "Clear cart", "ghost") + "\n\n"
+              else:
+                  out += "*Add %d more item%s to submit (minimum %d).*" % (
+                      MIN_ITEMS - n, "" if MIN_ITEMS - n == 1 else "s", MIN_ITEMS)
+                  if n:
+                      out += " " + btn("CLEAR", "Clear cart", "ghost")
+                  out += "\n\n"
+              out += "**🧑‍🍳 Record operator action** *(applied at the current time)*\n\n"
+              for v in ("F1", "C1"):
+                  out += " ".join([
+                      btn("ACT:%s:FILTER" % v, "%s filtered" % v, "ghost-accent"),
+                      btn("ACT:%s:TOPUP" % v, "%s +2 L top-up" % v, "ghost-accent"),
+                      btn("ACT:%s:CHANGE" % v, "%s oil changed" % v, "ghost-accent"),
+                  ]) + "\n\n"
+              out += btn("RESET", "↺ Reset demo", "tertiary") + "\n"
+              return out
+
+
+          def api(s, screen, note, route="menu"):
+              vats = {}
+              for v, vs in s["vats"].items():
+                  t = vs["tpm"]
+                  vats[v] = {"name": VAT_NAME[v], "tpm": round(t, 2),
+                             "status": "RED" if t >= LIMIT_TPM else ("AMBER" if t >= WARN_TPM else "GREEN"),
+                             "filter_active": vs.get("filter_blocks_left", 0) > 0}
+              n = sum(s["cart"].values())
+              return json.dumps({"type": "state", "screen": screen, "route": route, "note": note,
+                                 "clock": fmt_clock(s["clock"]), "clock_min": s["clock"], "vats": vats,
+                                 "cart": [{"sku": k, "name": NAMES[k], "qty": q} for k, q in s["cart"].items()],
+                                 "cart_count": n, "min_items": MIN_ITEMS, "can_submit": n >= MIN_ITEMS,
+                                 "menu": [{"section": t, "items": [{"sku": k, "name": nm} for k, nm in items]} for t, items in MENU],
+                                 "time_slots": [{"time": t, "label": l} for t, l in TIME_SLOTS],
+                                 "disclaimer": "DEMO MODEL - ILLUSTRATIVE PARAMETERS - NOT FOR FOOD-SAFETY DECISIONS"})
+
+
+          def main(query: str, state: str) -> dict:
+              try:
+                  s = json.loads(state) if state else {}
+              except Exception:
+                  s = {}
+              if not isinstance(s, dict) or "vats" not in s:
+                  s = new_state()
+              q = (query or "").strip()
+              route = "menu"
+              note = ""
+
+              m = re.match(r"^TIME:(\d{1,2}):(\d{2})", q)
+              if q.upper() == "RESET":
+                  s = new_state()
+                  nt = "Demo reset. Both vats start at %.1f %% TPM." % INITIAL_TPM["F1"]
+                  return {"new_state": json.dumps(s), "route": "menu", "reply_md": render_start(s, "↺ " + nt),
+                          "api_json": api(s, "start", nt)}
+              if m:
+                  hm = int(m.group(1)) * 60 + int(m.group(2))
+                  hm = max(OPEN_MIN, min(LAST_SLOT_MIN, hm - hm % 15))
+                  day0 = (s["clock"] // 1440) * 1440 if s["started"] else 0
+                  s["clock"] = day0 + hm
+                  s["started"] = True
+                  note = "⏱ Simulated clock set to **%s**." % fmt_clock(s["clock"])
+              elif not s["started"]:
+                  return {"new_state": json.dumps(s), "route": "menu",
+                          "reply_md": render_start(s, "👋 **FryWise demo.** Pick a time slot to start."),
+                          "api_json": api(s, "start", "Pick a time slot to start.")}
+              elif q.startswith("ADD:"):
+                  sku = q[4:].strip()
+                  if sku in NAMES:
+                      if sum(s["cart"].values()) >= MAX_ITEMS:
+                          note = "⚠️ Cart limit (%d items) reached." % MAX_ITEMS
+                      else:
+                          s["cart"][sku] = s["cart"].get(sku, 0) + 1
+                          note = "➕ Added **%s**." % NAMES[sku]
+                  else:
+                      note = "⚠️ Unknown item."
+              elif q.startswith("DEL:"):
+                  sku = q[4:].strip()
+                  if s["cart"].get(sku):
+                      s["cart"][sku] -= 1
+                      if s["cart"][sku] <= 0:
+                          del s["cart"][sku]
+                      note = "➖ Removed one **%s**." % NAMES.get(sku, sku)
+              elif q.upper() == "CLEAR":
+                  s["cart"] = {}
+                  note = "🗑 Cart cleared."
+              elif q.upper() == "MENU":
+                  note = ""
+              elif q.startswith("ACT:"):
+                  parts = q.split(":")
+                  v = parts[1] if len(parts) > 1 else ""
+                  act = parts[2] if len(parts) > 2 else ""
+                  if v in s["vats"]:
+                      vat = s["vats"][v]
+                      before = vat["tpm"]
+                      if act == "FILTER":
+                          vat["filter_blocks_left"] = 32
+                          note = "🧑‍🍳 **%s filtered.** TPM unchanged (%.1f %%); degradation rate reduced for the next 8 operating hours." % (VAT_NAME[v], before)
+                      elif act == "TOPUP":
+                          vat["tpm"] = mix(before, 2.0, VAT_VOLUME_L[v])
+                          note = "🧑‍🍳 **%s topped up with 2 L fresh oil.** TPM %.1f %% → %.1f %% (volume-weighted mix)." % (VAT_NAME[v], before, vat["tpm"])
+                      elif act == "CHANGE":
+                          vat["tpm"] = FRESH_TPM
+                          vat["filter_blocks_left"] = 0
+                          note = "🧑‍🍳 **%s oil changed.** New oil batch started at %.1f %% TPM." % (VAT_NAME[v], FRESH_TPM)
+              elif q.upper() == "SUBMIT":
+                  n = sum(s["cart"].values())
+                  if n >= MIN_ITEMS:
+                      return {"new_state": json.dumps(s), "route": "submit", "reply_md": "", "api_json": ""}
+                  note = "⚠️ At least %d items are needed to submit (cart has %d)." % (MIN_ITEMS, n)
+              else:
+                  note = "⚠️ Free text is not accepted in this demo — please use the buttons."
+
+              plain = note.replace("**", "")
+              return {"new_state": json.dumps(s), "route": route, "reply_md": render_menu(s, note),
+                      "api_json": api(s, "menu", plain)}
+        variables:
+        - variable: query
+          value_selector:
+          - sys
+          - query
+        - variable: state
+          value_selector:
+          - conversation
+          - state
+        outputs:
+          new_state:
+            type: string
+            children: null
+          route:
+            type: string
+            children: null
+          reply_md:
+            type: string
+            children: null
+          api_json:
+            type: string
+            children: null
+      height: 54
+      id: '1700000000002'
+      position:
+        x: 330
+        y: 300
+      positionAbsolute:
+        x: 330
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        desc: ''
+        selected: false
+        title: Submitted ≥5 items?
+        type: if-else
+        cases:
+        - case_id: 'true'
+          id: 'true'
+          logical_operator: and
+          conditions:
+          - id: 5bf1c771-8528-4279-870b-b4391dbccfa1
+            variable_selector:
+            - '1700000000002'
+            - route
+            comparison_operator: is
+            value: submit
+            varType: string
+      height: 126
+      id: '1700000000003'
+      position:
+        x: 630
+        y: 300
+      positionAbsolute:
+        x: 630
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        desc: ''
+        selected: false
+        title: Save state (menu)
+        type: assigner
+        version: '2'
+        items:
+        - variable_selector:
+          - conversation
+          - state
+          input_type: variable
+          operation: over-write
+          write_mode: over-write
+          value:
+          - '1700000000002'
+          - new_state
+      height: 54
+      id: '1700000000004'
+      position:
+        x: 930
+        y: 500
+      positionAbsolute:
+        x: 930
+        y: 500
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        desc: ''
+        selected: false
+        title: Show menu
+        type: answer
+        variables: []
+        answer: '{{#1700000000002.reply_md#}}'
+      height: 105
+      id: '1700000000005'
+      position:
+        x: 1230
+        y: 500
+      positionAbsolute:
+        x: 1230
+        y: 500
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        desc: ''
+        selected: false
+        title: ① Recipe parser (POS → fried kg)
+        type: code
+        code_language: python3
+        code: |
+          import json
+
+          # ===== RECIPE / FRYER-ROUTING MASTER (demo values) =====
+          # fried_g: grams of product that goes into the fryer per sold unit.
+          #   "portion"  = whole published portion weight is the fried item (fries, nuggets)
+          #   "estimate" = fried component not published; illustrative estimate
+          #   "grill"    = beef patty is cooked on the grill, not in a fryer -> 0 g
+          # stress: relative oil-stress weight per kg (1.0 = fries; breaded/crumbed items stress oil more)
+          # fry_input_factor: served weight -> raw input weight (1.0 until calibrated in pilot)
+          RECIPE = {
+              "fries_s":             {"name": "Franse Frietjes Klein",  "family": "fries",   "fried_g": 80,  "stress": 1.0, "basis": "portion"},
+              "fries_m":             {"name": "Franse Frietjes Medium", "family": "fries",   "fried_g": 114, "stress": 1.0, "basis": "portion"},
+              "fries_l":             {"name": "Franse Frietjes Groot",  "family": "fries",   "fried_g": 150, "stress": 1.0, "basis": "portion"},
+              "nuggets_6":           {"name": "Chicken McNuggets 6",    "family": "chicken", "fried_g": 109, "stress": 1.3, "basis": "portion"},
+              "nuggets_9":           {"name": "Chicken McNuggets 9",    "family": "chicken", "fried_g": 163, "stress": 1.3, "basis": "portion"},
+              "nuggets_20":          {"name": "Chicken McNuggets 20",   "family": "chicken", "fried_g": 362, "stress": 1.3, "basis": "portion"},
+              "mcchicken":           {"name": "McChicken",              "family": "chicken", "fried_g": 90,  "stress": 1.3, "basis": "estimate"},
+              "mccrispy":            {"name": "McCrispy",               "family": "chicken", "fried_g": 120, "stress": 1.4, "basis": "estimate"},
+              "chili_chicken":       {"name": "Chili Chicken",          "family": "chicken", "fried_g": 60,  "stress": 1.3, "basis": "estimate"},
+              "mckroket":            {"name": "McKroket",               "family": "chicken", "fried_g": 100, "stress": 1.5, "basis": "estimate"},
+              "filet_o_fish":        {"name": "Filet-O-Fish",           "family": "chicken", "fried_g": 55,  "stress": 1.2, "basis": "estimate"},
+              "big_mac":             {"name": "Big Mac",                "family": None,      "fried_g": 0,   "stress": 0.0, "basis": "grill"},
+              "quarter_pounder":     {"name": "Quarter Pounder",        "family": None,      "fried_g": 0,   "stress": 0.0, "basis": "grill"},
+              "hamburger":           {"name": "Hamburger",              "family": None,      "fried_g": 0,   "stress": 0.0, "basis": "grill"},
+              "cheeseburger":        {"name": "Cheeseburger",           "family": None,      "fried_g": 0,   "stress": 0.0, "basis": "grill"},
+              "double_cheeseburger": {"name": "Double Cheeseburger",    "family": None,      "fried_g": 0,   "stress": 0.0, "basis": "grill"},
+          }
+          FRY_INPUT_FACTOR = 1.0
+          FAMILY_LABEL = {"fries": "Fries vats", "chicken": "Chicken vats", None: "— (not fried)"}
+
+
+          def main(new_state: str) -> dict:
+              s = json.loads(new_state)
+              cart = s.get("cart", {})
+              lines = []
+              per_family = {"fries": {"kg": 0.0, "stress_kg": 0.0}, "chicken": {"kg": 0.0, "stress_kg": 0.0}}
+              non_fried = []
+              for sku, qty in cart.items():
+                  r = RECIPE.get(sku)
+                  if r is None or qty <= 0:
+                      continue
+                  kg = qty * r["fried_g"] * FRY_INPUT_FACTOR / 1000.0
+                  stress_kg = kg * r["stress"]
+                  lines.append({"sku": sku, "name": r["name"], "qty": qty, "family": r["family"],
+                                "fried_kg": round(kg, 3), "stress_kg": round(stress_kg, 3), "basis": r["basis"]})
+                  if r["family"]:
+                      per_family[r["family"]]["kg"] += kg
+                      per_family[r["family"]]["stress_kg"] += stress_kg
+                  else:
+                      non_fried.append("%d × %s" % (qty, r["name"]))
+              for f in per_family:
+                  per_family[f] = {k: round(v, 3) for k, v in per_family[f].items()}
+
+              md = "| Item | Qty | Fryer | Fried kg | Basis |\n|---|---:|---|---:|---|\n"
+              for l in lines:
+                  md += "| %s | %d | %s | %.3f | %s |\n" % (l["name"], l["qty"], FAMILY_LABEL[l["family"]], l["fried_kg"], l["basis"])
+              md += "| **Total fried** | | | **%.3f** | |\n" % (per_family["fries"]["kg"] + per_family["chicken"]["kg"])
+              if non_fried:
+                  md += "\n🔎 Filtered out by the recipe table (grill, no fryer load): %s\n" % ", ".join(non_fried)
+
+              order = {"lines": lines, "per_family": per_family, "non_fried": non_fried,
+                       "total_items": sum(l["qty"] for l in lines)}
+              return {"order_json": json.dumps(order), "order_md": md}
+        variables:
+        - variable: new_state
+          value_selector:
+          - '1700000000002'
+          - new_state
+        outputs:
+          order_json:
+            type: string
+            children: null
+          order_md:
+            type: string
+            children: null
+      height: 54
+      id: '1700000000006'
+      position:
+        x: 930
+        y: 200
+      positionAbsolute:
+        x: 930
+        y: 200
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        desc: ''
+        selected: false
+        title: ② TPM model (pre-trained params)
+        type: code
+        code_language: python3
+        code: |
+          import json
+          import math
+
+          # ===== PRE-TRAINED MODEL PARAMETERS =====
+          # Replace this block with the coefficients exported from the Python training notebook.
+          # Current values are ILLUSTRATIVE (hand-set so that a vat lasts roughly 1–1.5 trading days from 18 %).
+          MODEL = {
+              "version": "demo-0.1-illustrative",
+              "vat_family": {"F1": "fries", "C1": "chicken"},
+              "routing_share": {"F1": 0.5, "C1": 0.5},          # store has 2 vats per family; F1/C1 get half
+              "k_tpm_per_stress_kg": {"F1": 0.045, "C1": 0.060},  # TPM points per stress-weighted kg fried
+              "idle_tpm_per_block": 0.010,                       # TPM points per 15 min hot (base thermal load)
+              "resid_sd_per_block": 0.05,                        # TPM points, from model residuals
+              "capacity_stress_kg_per_block": {"F1": 10.0, "C1": 8.0},
+              "filter_rate_multiplier": 0.85,                    # filtering slows subsequent degradation
+              "filter_effect_blocks": 32,                        # ... for 8 operating hours
+              "fresh_tpm": 5.0,
+              "vat_volume_l": {"F1": 15.0, "C1": 15.0},
+              # Historical POS profile: average orders per 15-min block, by hour of day (store open 07–24)
+              "hist_orders_per_block": {7: 8, 8: 12, 9: 10, 10: 12, 11: 24, 12: 40, 13: 34, 14: 18, 15: 12,
+                                        16: 14, 17: 26, 18: 38, 19: 30, 20: 20, 21: 16, 22: 12, 23: 8},
+              # Historical average stress-weighted fried kg per order, per family
+              "hist_stress_kg_per_order": {"fries": 0.14, "chicken": 0.11},
+              "peak_orders": 30,
+              "quiet_orders": 15,
+              "horizon_blocks": 204,                             # 3 trading days of 17 h
+          }
+          OPEN_MIN = 7 * 60
+
+
+          def next_block(t):
+              t += 15
+              if t % 1440 == 0:          # midnight: store closed until 07:00
+                  t += OPEN_MIN
+              return t
+
+
+          def hour_of(t):
+              return (t % 1440) // 60
+
+
+          def orders_at(t):
+              return MODEL["hist_orders_per_block"].get(hour_of(t), 0)
+
+
+          def slot_label(orders):
+              if orders >= MODEL["peak_orders"]:
+                  return "PEAK"
+              if orders <= MODEL["quiet_orders"]:
+                  return "QUIET"
+              return "NORMAL"
+
+
+          def hist_load(v, t):
+              fam = MODEL["vat_family"][v]
+              raw = MODEL["hist_stress_kg_per_order"][fam] * orders_at(t) * MODEL["routing_share"][v]
+              return min(raw, MODEL["capacity_stress_kg_per_block"][v])
+
+
+          def mix(tpm, add_l, vol):
+              return (tpm * (vol - add_l) + MODEL["fresh_tpm"] * add_l) / vol
+
+
+          def trajectory(v, tpm0, filter_left, times, action=None, at_idx=0):
+              """Mean and sd of TPM at the END of each future block. Action applied at the start of block at_idx."""
+              k = MODEL["k_tpm_per_stress_kg"][v]
+              vol = MODEL["vat_volume_l"][v]
+              mean, sd = [], []
+              tpm = tpm0
+              var = 0.0
+              fl = filter_left
+              for i, t in enumerate(times):
+                  if action and i == at_idx:
+                      if action == "FILTER":
+                          fl = MODEL["filter_effect_blocks"]
+                      elif action == "TOP_UP_2L":
+                          tpm = mix(tpm, 2.0, vol)
+                      elif action == "PARTIAL_5L":
+                          tpm = mix(tpm, 5.0, vol)
+                      elif action == "FULL_CHANGE":
+                          tpm = MODEL["fresh_tpm"]
+                          fl = 0
+                          var = 0.0
+                  mult = MODEL["filter_rate_multiplier"] if fl > 0 else 1.0
+                  tpm += MODEL["idle_tpm_per_block"] + k * mult * hist_load(v, t)
+                  var += MODEL["resid_sd_per_block"] ** 2
+                  fl = max(0, fl - 1)
+                  mean.append(round(tpm, 3))
+                  sd.append(round(math.sqrt(var), 3))
+              return mean, sd
+
+
+          def main(new_state: str, order_json: str) -> dict:
+              s = json.loads(new_state)
+              order = json.loads(order_json)
+              t_now = s["clock"]
+              orders_slot = orders_at(t_now)
+              label = slot_label(orders_slot)
+
+              # --- 1. Update for the submitted 15-min block ---------------------------
+              # Scenario reading: "this order represents the typical order in this slot",
+              # so block load = order stress-kg x historical order count x routing share.
+              vats_out = {}
+              for v, vs in s["vats"].items():
+                  fam = MODEL["vat_family"][v]
+                  order_stress = order["per_family"][fam]["stress_kg"]
+                  raw_load = order_stress * orders_slot * MODEL["routing_share"][v]
+                  cap = MODEL["capacity_stress_kg_per_block"][v]
+                  load = min(raw_load, cap)
+                  hist = MODEL["hist_stress_kg_per_order"][fam] * orders_slot * MODEL["routing_share"][v]
+                  mult = MODEL["filter_rate_multiplier"] if vs.get("filter_blocks_left", 0) > 0 else 1.0
+                  delta = MODEL["idle_tpm_per_block"] + MODEL["k_tpm_per_stress_kg"][v] * mult * load
+                  vats_out[v] = {
+                      "family": fam,
+                      "tpm_before": round(vs["tpm"], 3),
+                      "delta": round(delta, 3),
+                      "tpm_after": round(vs["tpm"] + delta, 3),
+                      "order_stress_kg": order_stress,
+                      "block_load_kg": round(load, 3),
+                      "block_load_raw_kg": round(raw_load, 3),
+                      "capacity_reached": raw_load > cap,
+                      "hist_block_load_kg": round(hist, 3),
+                      "load_index": round(raw_load / hist, 3) if hist > 0 else None,
+                      "filter_active": vs.get("filter_blocks_left", 0) > 0,
+                      "filter_left_after": max(0, vs.get("filter_blocks_left", 0) - 1),
+                  }
+
+              # --- 2. Forecast from the end of this block -----------------------------
+              t_next = next_block(t_now)
+              times = []
+              t = t_next
+              for _ in range(MODEL["horizon_blocks"]):
+                  times.append(t)
+                  t = next_block(t)
+              quiet_idx = next((i for i, tt in enumerate(times) if orders_at(tt) <= MODEL["quiet_orders"]), 0)
+
+              scenarios = {}
+              for v, vo in vats_out.items():
+                  sc = {}
+                  for name, act, idx in [("DO_NOTHING", None, 0),
+                                         ("FILTER_AT_WINDOW", "FILTER", quiet_idx),
+                                         ("TOP_UP_2L_AT_WINDOW", "TOP_UP_2L", quiet_idx),
+                                         ("PARTIAL_5L_AT_WINDOW", "PARTIAL_5L", quiet_idx),
+                                         ("FULL_CHANGE_AT_WINDOW", "FULL_CHANGE", quiet_idx),
+                                         ("FULL_CHANGE_NOW", "FULL_CHANGE", 0)]:
+                      m, sd = trajectory(v, vo["tpm_after"], vo["filter_left_after"], times, act, idx)
+                      sc[name] = {"mean": m, "sd": sd, "action_idx": idx}
+                  scenarios[v] = sc
+
+              out = {
+                  "model_version": MODEL["version"],
+                  "block_start": t_now,
+                  "clock_next": t_next,
+                  "slot": {"hour": hour_of(t_now), "orders_per_block": orders_slot, "label": label},
+                  "vats": vats_out,
+                  "times": times,
+                  "quiet_window_idx": quiet_idx,
+                  "quiet_window_start": times[quiet_idx],
+                  "scenarios": scenarios,
+              }
+              return {"model_json": json.dumps(out)}
+        variables:
+        - variable: new_state
+          value_selector:
+          - '1700000000002'
+          - new_state
+        - variable: order_json
+          value_selector:
+          - '1700000000006'
+          - order_json
+        outputs:
+          model_json:
+            type: string
+            children: null
+      height: 54
+      id: '1700000000007'
+      position:
+        x: 1230
+        y: 200
+      positionAbsolute:
+        x: 1230
+        y: 200
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        desc: ''
+        selected: false
+        title: ③ Policy rules + optimizer
+        type: code
+        code_language: python3
+        code: |
+          import json
+
+          # ===== LAYER 1: APPROVED POLICY (demo values — must be set by operator / food-safety owner) =====
+          POLICY = {
+              "limit_tpm": 24.0,              # action limit: oil must not be used at or above this
+              "warn_tpm": 21.0,               # warning band
+              "measure_margin": 2.0,          # re-measure when the P90 path reaches limit - margin
+              "max_measure_interval_h": 4.0,  # never go longer than this without a reading
+              "z_p90": 1.2816,
+              "safe_target_h": 6.0,           # an action must keep the P90 path below the limit for at least this long
+              "red_if_cross_within_h": 1.0,
+          }
+          # ===== LAYER 3: OPTIMIZER COSTS (illustrative) =====
+          COST = {"oil_eur_per_l": 2.0, "labor_eur_per_min": 0.30,
+                  "downtime_eur_per_min": {"PEAK": 3.0, "NORMAL": 1.0, "QUIET": 0.3}}
+          ACTIONS = {
+              # action code: (scenario, oil L, labour min, downtime min, when)
+              "CONTINUE":                        ("DO_NOTHING",            0,  0,  0,  "none"),
+              "FILTER_IN_QUIET_WINDOW":          ("FILTER_AT_WINDOW",      0,  12, 12, "window"),
+              "TOP_UP_IN_QUIET_WINDOW":          ("TOP_UP_2L_AT_WINDOW",   2,  4,  0,  "window"),
+              "PARTIAL_REPLACE_IN_QUIET_WINDOW": ("PARTIAL_5L_AT_WINDOW",  5,  15, 15, "window"),
+              "FULL_CHANGE_IN_QUIET_WINDOW":     ("FULL_CHANGE_AT_WINDOW", 15, 30, 30, "window"),
+              "FULL_CHANGE_NOW":                 ("FULL_CHANGE_NOW",       15, 30, 30, "now"),
+          }
+          ORDERS_PEAK, ORDERS_QUIET = 30, 15
+
+
+          def first_cross(mean, sd, level, z):
+              for i, (m, s) in enumerate(zip(mean, sd)):
+                  if m + z * s >= level:
+                      return i
+              return None
+
+
+          def slot_of_orders(n):
+              return "PEAK" if n >= ORDERS_PEAK else ("QUIET" if n <= ORDERS_QUIET else "NORMAL")
+
+
+          def load_word(li):
+              if li is None:
+                  return "NO_LOAD"
+              if li < 0.85:
+                  return "LOWER_THAN_USUAL"
+              if li <= 1.15:
+                  return "SIMILAR_TO_USUAL"
+              if li <= 1.5:
+                  return "HIGHER_THAN_USUAL"
+              return "MUCH_HIGHER_THAN_USUAL"
+
+
+          def main(model_json: str) -> dict:
+              mdl = json.loads(model_json)
+              times = mdl["times"]
+              w = mdl["quiet_window_idx"]
+              lim, z = POLICY["limit_tpm"], POLICY["z_p90"]
+              decisions = {}
+              facts = ["Time slot of this order: %s." % mdl["slot"]["label"],
+                       "A quiet window is %s." % ("happening now" if w == 0 else "coming later today")]
+
+              for v, vo in mdl["vats"].items():
+                  sc = mdl["scenarios"][v]
+                  base = sc["DO_NOTHING"]
+                  p90_i = first_cross(base["mean"], base["sd"], lim, z)
+                  tpm = vo["tpm_after"]
+
+                  # ---- Layer 1: deterministic safety rules decide what is allowed ----
+                  if tpm >= lim:
+                      status, allowed, rule = "RED", ["FULL_CHANGE_NOW"], "TPM_AT_OR_ABOVE_LIMIT"
+                  elif p90_i is not None and ((p90_i + 1) * 0.25 <= POLICY["red_if_cross_within_h"] or (w > 0 and p90_i < w)):
+                      status, allowed, rule = "RED", ["FULL_CHANGE_NOW"], "LIMIT_LIKELY_BEFORE_QUIET_WINDOW"
+                  elif tpm >= POLICY["warn_tpm"] or (p90_i is not None and (p90_i + 1) * 0.25 < POLICY["safe_target_h"]):
+                      status, rule = "AMBER", "APPROACHING_LIMIT"
+                      allowed = ["FILTER_IN_QUIET_WINDOW", "TOP_UP_IN_QUIET_WINDOW", "PARTIAL_REPLACE_IN_QUIET_WINDOW",
+                                 "FULL_CHANGE_IN_QUIET_WINDOW", "FULL_CHANGE_NOW"]
+                  else:
+                      status, rule = "GREEN", "WITHIN_LIMITS"
+                      allowed = ["CONTINUE", "FILTER_IN_QUIET_WINDOW", "TOP_UP_IN_QUIET_WINDOW"]
+
+                  # ---- Layer 3: lowest-cost allowed action that meets the safety target ----
+                  table = []
+                  for a, (scn, oil, lab, down, when) in ACTIONS.items():
+                      tr = sc[scn]
+                      ci = first_cross(tr["mean"], tr["sd"], lim, z)
+                      p50 = first_cross(tr["mean"], tr["sd"], lim, 0.0)
+                      p10 = first_cross(tr["mean"], tr["sd"], lim, -z)
+                      act_idx = 0 if when != "window" else w
+                      act_slot = slot_of_orders(0) if when == "none" else mdl["slot"]["label"] if act_idx == 0 else "QUIET"
+                      cost = oil * COST["oil_eur_per_l"] + lab * COST["labor_eur_per_min"] + down * COST["downtime_eur_per_min"][act_slot]
+                      safe_h = None if ci is None else (ci + 1) * 0.25
+                      table.append({
+                          "action": a, "allowed": a in allowed,
+                          "rul_p90_h": safe_h,
+                          "rul_p50_h": None if p50 is None else (p50 + 1) * 0.25,
+                          "rul_p10_h": None if p10 is None else (p10 + 1) * 0.25,
+                          "oil_l": oil, "labor_min": lab, "downtime_min": down, "cost_eur": round(cost, 2),
+                          "meets_target": safe_h is None or safe_h >= POLICY["safe_target_h"],
+                          "action_time": times[act_idx] if when != "none" else None,
+                      })
+                  feasible = [r for r in table if r["allowed"] and r["meets_target"]]
+                  if feasible:
+                      best = sorted(feasible, key=lambda r: (r["cost_eur"], -(r["rul_p90_h"] or 1e9)))[0]
+                      why = "LOWEST_COST_ALLOWED_ACTION_THAT_KEEPS_OIL_BELOW_LIMIT_FOR_TARGET_PERIOD"
+                  else:
+                      best = sorted([r for r in table if r["allowed"]], key=lambda r: -(r["rul_p90_h"] or 1e9))[0]
+                      why = "NO_ACTION_MEETS_TARGET_SO_LONGEST_SAFE_LIFE_CHOSEN"
+
+                  # ---- Next measurement (from the chosen action's trajectory) ----
+                  tr = sc[ACTIONS[best["action"]][0]]
+                  mi = first_cross(tr["mean"], tr["sd"], lim - POLICY["measure_margin"], z)
+                  max_i = int(POLICY["max_measure_interval_h"] / 0.25) - 1
+                  if mi is None or mi > max_i:
+                      mi = max_i
+                      measure_reason = "ROUTINE_MAXIMUM_INTERVAL"
+                  else:
+                      measure_reason = "FORECAST_APPROACHING_LIMIT"
+                  measure_at = mdl["clock_next"] if mi <= 0 else times[mi]
+
+                  decisions[v] = {"status": status, "rule": rule, "allowed": allowed,
+                                  "recommended": best["action"], "why": why,
+                                  "next_measure_at": measure_at, "measure_reason": measure_reason,
+                                  "table": table}
+                  facts.append(
+                      "Vat %s (%s): status=%s; rule=%s; load_in_this_slot=%s; vat_capacity_reached=%s; filter_effect_active=%s; "
+                      "recommended_action=%s; selection_basis=%s; other_allowed_actions=%s; next_measurement_reason=%s."
+                      % (v, vo["family"], status, rule, load_word(vo["load_index"]),
+                         "yes" if vo["capacity_reached"] else "no", "yes" if vo["filter_active"] else "no",
+                         best["action"], why, ",".join(a for a in allowed if a != best["action"]) or "none", measure_reason))
+
+              out = {"policy": POLICY, "decisions": decisions}
+              return {"decision_json": json.dumps(out), "llm_facts": "\n".join(facts)}
+        variables:
+        - variable: model_json
+          value_selector:
+          - '1700000000007'
+          - model_json
+        outputs:
+          decision_json:
+            type: string
+            children: null
+          llm_facts:
+            type: string
+            children: null
+      height: 54
+      id: '1700000000008'
+      position:
+        x: 1530
+        y: 200
+      positionAbsolute:
+        x: 1530
+        y: 200
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        desc: ''
+        selected: false
+        title: ④ LLM explanation (no numbers)
+        type: llm
+        variables: []
+        model:
+          provider: langgenius/openai/openai
+          name: gpt-4o-mini
+          mode: chat
+          completion_params:
+            temperature: 0.2
+        prompt_template:
+        - id: a9c221d7-ebfa-4935-b50e-b01d13116947
+          role: system
+          text: |-
+            You are the explanation layer of FryWise, a frying-oil decision-support DEMO for a quick-service restaurant.
+
+            The decision has ALREADY been made by deterministic code:
+            - Layer 1 (policy rules) decided which actions are allowed.
+            - Layer 2 (prediction model) forecast the oil-quality trajectory.
+            - Layer 3 (optimizer) chose the recommended action.
+            Your only job is to explain each recommendation to a busy fryer operator in plain English.
+
+            Hard rules:
+            1. Never change, add, remove or question the recommended action.
+            2. Never write any number, digit, percentage, time, temperature, threshold, price or duration — not even spelled out. Numbers are shown by the system, not by you.
+            3. Never invent facts that are not in the input. Never say oil is safe or unsafe beyond what the status says.
+            4. RED status: be short and firm; safety comes first.
+            5. AMBER status: explain why this action was chosen instead of a more expensive one (e.g. a full change), and that the timing avoids a busy period when relevant.
+            6. GREEN status: reassure briefly; mention if the current load is unusually high.
+            7. Each reason: at most two short sentences. shift_summary: one sentence for the shift lead covering both vats.
+
+            Output ONLY valid JSON, no markdown, in exactly this shape:
+            {"F1": {"reason": "..."}, "C1": {"reason": "..."}, "shift_summary": "..."}
+        - id: 825506ab-e12d-41e3-8a40-cd5ff7b3afcb
+          role: user
+          text: |-
+            Decision facts from the policy and optimizer layers:
+
+            {{#1700000000008.llm_facts#}}
+        context:
+          enabled: false
+          variable_selector: []
+        vision:
+          enabled: false
+      height: 98
+      id: '1700000000009'
+      position:
+        x: 1830
+        y: 200
+      positionAbsolute:
+        x: 1830
+        y: 200
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        desc: ''
+        selected: false
+        title: ⑤ Validate LLM + compose answer
+        type: code
+        code_language: python3
+        code: |
+          import json
+          import re
+
+          WARN_TPM, LIMIT_TPM = 21.0, 24.0   # display colours only (must match policy node)
+          VAT_NAME = {"F1": "Fries vat F1", "C1": "Chicken vat C1"}
+          ACTION_LABEL = {
+              "CONTINUE": "Continue frying — no action needed",
+              "FILTER_IN_QUIET_WINDOW": "Filter in the next quiet window",
+              "TOP_UP_IN_QUIET_WINDOW": "Top up 2 L fresh oil in the next quiet window",
+              "PARTIAL_REPLACE_IN_QUIET_WINDOW": "Replace 5 L of oil in the next quiet window",
+              "FULL_CHANGE_IN_QUIET_WINDOW": "Full oil change in the next quiet window",
+              "FULL_CHANGE_NOW": "Full oil change now",
+          }
+          FALLBACK_REASON = {
+              "RED": "The oil is at or close to the approved limit, so the policy rules only allow an immediate change.",
+              "AMBER": "The oil is approaching the approved limit; the selected action is the lowest-cost option that keeps it within policy for the target period.",
+              "GREEN": "The oil is comfortably within limits for the forecast period, so no costly intervention is needed now.",
+          }
+
+
+          def fmt_clock(t):
+              if t is None:
+                  return "—"
+              return "Day %d · %02d:%02d" % (t // 1440 + 1, (t % 1440) // 60, t % 60)
+
+
+          def dot(tpm):
+              return "🔴" if tpm >= LIMIT_TPM else ("🟠" if tpm >= WARN_TPM else "🟢")
+
+
+          def h(x, horizon_h):
+              return "> %.0f h" % horizon_h if x is None else "%.2g h" % x if x < 10 else "%.0f h" % x
+
+
+          def btn(msg, label, variant="secondary"):
+              return '<button data-message="%s" data-variant="%s">%s</button>' % (msg, variant, label)
+
+
+          def parse_llm(text):
+              if not text:
+                  return {}
+              t = re.sub(r"^```(?:json)?|```$", "", text.strip(), flags=re.M).strip()
+              m = re.search(r"\{.*\}", t, flags=re.S)
+              if not m:
+                  return {}
+              try:
+                  d = json.loads(m.group(0))
+                  return d if isinstance(d, dict) else {}
+              except Exception:
+                  return {}
+
+
+          def clean_text(x):
+              """LLM text may not contain numbers: numbers come only from the model and policy nodes."""
+              if not isinstance(x, str) or not x.strip() or re.search(r"\d", x):
+                  return None
+              return x.strip()[:400]
+
+
+          def main(llm_text: str, new_state: str, model_json: str, decision_json: str, order_md: str, order_json: str) -> dict:
+              s = json.loads(new_state)
+              mdl = json.loads(model_json)
+              dec = json.loads(decision_json)
+              llm = parse_llm(llm_text)
+              horizon_h = len(mdl["times"]) * 0.25
+              llm_ok = True
+
+              # ---- update state ----
+              for v, vo in mdl["vats"].items():
+                  s["vats"][v]["tpm"] = vo["tpm_after"]
+                  s["vats"][v]["filter_blocks_left"] = vo["filter_left_after"]
+              s["clock"] = mdl["clock_next"]
+              s["cart"] = {}
+              s["orders_submitted"] = s.get("orders_submitted", 0) + 1
+
+              f, c = s["vats"]["F1"]["tpm"], s["vats"]["C1"]["tpm"]
+              out = ("> 🕐 **%s**　｜　%s F1 Fries **%.1f %%**　｜　%s C1 Chicken **%.1f %%**\n>\n"
+                     "> *DEMO MODEL — ILLUSTRATIVE PARAMETERS — NOT FOR FOOD-SAFETY OR LIVE OPERATIONAL DECISIONS*\n\n"
+                     % (fmt_clock(s["clock"]), dot(f), f, dot(c), c))
+
+              slot = mdl["slot"]
+              out += "## ① Order parsed — slot %s–%s (%s, ~%d orders / 15 min historically)\n\n" % (
+                  fmt_clock(mdl["block_start"]), fmt_clock(mdl["clock_next"])[-5:], slot["label"].lower(), slot["orders_per_block"])
+              out += order_md + "\n"
+
+              out += "\n## ② TPM update for this 15-minute slot\n\n"
+              out += "*Scenario: every order in this slot looks like yours (your order × typical order count × vat routing share).*\n\n"
+              out += "| Vat | TPM before | Load vs usual | Δ TPM | TPM now |\n|---|---:|---:|---:|---:|\n"
+              for v, vo in mdl["vats"].items():
+                  li = vo["load_index"]
+                  li_txt = "—" if li is None else "%+.0f %%" % ((li - 1) * 100)
+                  if vo["capacity_reached"]:
+                      li_txt += " ⚠️ cap"
+                  out += "| %s | %.2f %% | %s | +%.2f | %s **%.2f %%** |\n" % (
+                      VAT_NAME[v], vo["tpm_before"], li_txt, vo["delta"], dot(vo["tpm_after"]), vo["tpm_after"])
+              if any(vo["capacity_reached"] for vo in mdl["vats"].values()):
+                  out += "\n⚠️ *Vat capacity reached: load above capacity is assumed to go to the other vats of the same family.*\n"
+
+              out += "\n## ③ Recommendation\n\n"
+              out += "Next quiet window starts **%s**.\n\n" % fmt_clock(mdl["quiet_window_start"])
+              for v, d in dec["decisions"].items():
+                  best = next(r for r in d["table"] if r["action"] == d["recommended"])
+                  lv = llm.get(v, {}) if isinstance(llm.get(v), dict) else {}
+                  reason = clean_text(lv.get("reason"))
+                  if reason is None:
+                      llm_ok = False
+                      reason = FALLBACK_REASON[d["status"]]
+                  icon = {"RED": "🔴", "AMBER": "🟠", "GREEN": "🟢"}[d["status"]]
+                  out += "### %s %s — %s\n\n" % (icon, VAT_NAME[v], ACTION_LABEL[d["recommended"]])
+                  if best["action_time"] is not None:
+                      out += "- **When:** %s\n" % fmt_clock(best["action_time"])
+                  out += "- **Measure again:** %s\n" % fmt_clock(d["next_measure_at"])
+                  out += "- **Remaining useful life after this action:** median %s (likely range %s – %s)\n" % (
+                      h(best["rul_p50_h"], horizon_h), h(best["rul_p90_h"], horizon_h), h(best["rul_p10_h"], horizon_h))
+                  out += "- **Why:** %s\n\n" % reason
+                  out += "**Action comparison**\n\n"
+                  out += "| Action | Allowed | Safe until (P90) | Median RUL | Oil | Labour | Cost |\n|---|:-:|---:|---:|---:|---:|---:|\n"
+                  for r in d["table"]:
+                      mark = "✅" if r["action"] == d["recommended"] else ("✓" if r["allowed"] else "✗")
+                      out += "| %s | %s | %s | %s | %d L | %d min | €%.2f |\n" % (
+                          ACTION_LABEL[r["action"]], mark, h(r["rul_p90_h"], horizon_h), h(r["rul_p50_h"], horizon_h),
+                          r["oil_l"], r["labor_min"], r["cost_eur"])
+                  out += "\n"
+
+              summ = clean_text(llm.get("shift_summary"))
+              if summ:
+                  out += "**Shift lead summary:** %s\n\n" % summ
+              if not llm_ok:
+                  out += "*Explanation fallback used (LLM output missing or contained numbers).*\n\n"
+              out += "*RUL = operating hours until the forecast reaches the %.0f %% policy limit (store closed 00:00–07:00). Model %s.*\n\n" % (
+                  dec["policy"]["limit_tpm"], mdl["model_version"])
+
+              out += btn("MENU", "🛒 Next order (%s)" % fmt_clock(s["clock"])[-5:], "primary") + "\n\n"
+              for v in ("F1", "C1"):
+                  out += " ".join([btn("ACT:%s:FILTER" % v, "%s filtered" % v, "ghost-accent"),
+                                   btn("ACT:%s:TOPUP" % v, "%s +2 L top-up" % v, "ghost-accent"),
+                                   btn("ACT:%s:CHANGE" % v, "%s oil changed" % v, "ghost-accent")]) + "\n\n"
+              order = json.loads(order_json) if order_json else {}
+              res_vats = {}
+              for v, vo in mdl["vats"].items():
+                  d = dec["decisions"][v]
+                  best = next(r for r in d["table"] if r["action"] == d["recommended"])
+                  lv = llm.get(v, {}) if isinstance(llm.get(v), dict) else {}
+                  res_vats[v] = {
+                      "name": VAT_NAME[v], "status": d["status"],
+                      "tpm_before": vo["tpm_before"], "delta": vo["delta"], "tpm_now": vo["tpm_after"],
+                      "load_vs_usual_pct": None if vo["load_index"] is None else round((vo["load_index"] - 1) * 100),
+                      "capacity_reached": vo["capacity_reached"], "filter_active": vo["filter_active"],
+                      "action": d["recommended"], "action_label": ACTION_LABEL[d["recommended"]],
+                      "action_time": fmt_clock(best["action_time"]) if best["action_time"] is not None else None,
+                      "measure_again": fmt_clock(d["next_measure_at"]),
+                      "rul_median": h(best["rul_p50_h"], horizon_h), "rul_range": "%s - %s" % (h(best["rul_p90_h"], horizon_h), h(best["rul_p10_h"], horizon_h)),
+                      "why": clean_text(lv.get("reason")) or FALLBACK_REASON[d["status"]],
+                      "comparison": [{"action": ACTION_LABEL[r["action"]], "recommended": r["action"] == d["recommended"],
+                                      "allowed": r["allowed"], "safe_until": h(r["rul_p90_h"], horizon_h),
+                                      "median_rul": h(r["rul_p50_h"], horizon_h), "oil_l": r["oil_l"],
+                                      "labor_min": r["labor_min"], "cost_eur": r["cost_eur"]} for r in d["table"]],
+                  }
+              api = {"type": "result", "screen": "result",
+                     "clock": fmt_clock(s["clock"]), "clock_min": s["clock"],
+                     "vats": {v: {"name": VAT_NAME[v], "tpm": round(s["vats"][v]["tpm"], 2),
+                                  "status": dec["decisions"][v]["status"],
+                                  "filter_active": s["vats"][v]["filter_blocks_left"] > 0} for v in s["vats"]},
+                     "slot": {"from": fmt_clock(mdl["block_start"]), "to": fmt_clock(mdl["clock_next"]),
+                              "label": slot["label"], "typical_orders_per_15min": slot["orders_per_block"]},
+                     "order": {"lines": order.get("lines", []), "non_fried": order.get("non_fried", []),
+                               "total_fried_kg": round(sum(l["fried_kg"] for l in order.get("lines", [])), 3)},
+                     "quiet_window": fmt_clock(mdl["quiet_window_start"]),
+                     "result": res_vats,
+                     "shift_summary": summ, "llm_fallback_used": not llm_ok,
+                     "policy_limit_tpm": dec["policy"]["limit_tpm"], "model_version": mdl["model_version"],
+                     "cart": [], "cart_count": 0,
+                     "disclaimer": "DEMO MODEL - ILLUSTRATIVE PARAMETERS - NOT FOR FOOD-SAFETY DECISIONS"}
+              return {"final_md": out, "final_state": json.dumps(s), "api_json": json.dumps(api)}
+        variables:
+        - variable: llm_text
+          value_selector:
+          - '1700000000009'
+          - text
+        - variable: new_state
+          value_selector:
+          - '1700000000002'
+          - new_state
+        - variable: model_json
+          value_selector:
+          - '1700000000007'
+          - model_json
+        - variable: decision_json
+          value_selector:
+          - '1700000000008'
+          - decision_json
+        - variable: order_md
+          value_selector:
+          - '1700000000006'
+          - order_md
+        - variable: order_json
+          value_selector:
+          - '1700000000006'
+          - order_json
+        outputs:
+          final_md:
+            type: string
+            children: null
+          final_state:
+            type: string
+            children: null
+          api_json:
+            type: string
+            children: null
+      height: 54
+      id: '1700000000010'
+      position:
+        x: 2130
+        y: 200
+      positionAbsolute:
+        x: 2130
+        y: 200
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        desc: ''
+        selected: false
+        title: Save state (TPM, clock)
+        type: assigner
+        version: '2'
+        items:
+        - variable_selector:
+          - conversation
+          - state
+          input_type: variable
+          operation: over-write
+          write_mode: over-write
+          value:
+          - '1700000000010'
+          - final_state
+      height: 54
+      id: '1700000000011'
+      position:
+        x: 2430
+        y: 200
+      positionAbsolute:
+        x: 2430
+        y: 200
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        desc: ''
+        selected: false
+        title: Show recommendation
+        type: answer
+        variables: []
+        answer: '{{#1700000000010.final_md#}}'
+      height: 105
+      id: '1700000000012'
+      position:
+        x: 2730
+        y: 200
+      positionAbsolute:
+        x: 2730
+        y: 200
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    edges:
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: start
+        targetType: code
+      id: 1700000000001-source-1700000000002-target
+      source: '1700000000001'
+      sourceHandle: source
+      target: '1700000000002'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: code
+        targetType: if-else
+      id: 1700000000002-source-1700000000003-target
+      source: '1700000000002'
+      sourceHandle: source
+      target: '1700000000003'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: if-else
+        targetType: code
+      id: 1700000000003-true-1700000000006-target
+      source: '1700000000003'
+      sourceHandle: 'true'
+      target: '1700000000006'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: if-else
+        targetType: assigner
+      id: 1700000000003-false-1700000000004-target
+      source: '1700000000003'
+      sourceHandle: 'false'
+      target: '1700000000004'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: assigner
+        targetType: answer
+      id: 1700000000004-source-1700000000005-target
+      source: '1700000000004'
+      sourceHandle: source
+      target: '1700000000005'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: code
+        targetType: code
+      id: 1700000000006-source-1700000000007-target
+      source: '1700000000006'
+      sourceHandle: source
+      target: '1700000000007'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: code
+        targetType: code
+      id: 1700000000007-source-1700000000008-target
+      source: '1700000000007'
+      sourceHandle: source
+      target: '1700000000008'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: code
+        targetType: llm
+      id: 1700000000008-source-1700000000009-target
+      source: '1700000000008'
+      sourceHandle: source
+      target: '1700000000009'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: llm
+        targetType: code
+      id: 1700000000009-source-1700000000010-target
+      source: '1700000000009'
+      sourceHandle: source
+      target: '1700000000010'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: code
+        targetType: assigner
+      id: 1700000000010-source-1700000000011-target
+      source: '1700000000010'
+      sourceHandle: source
+      target: '1700000000011'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: assigner
+        targetType: answer
+      id: 1700000000011-source-1700000000012-target
+      source: '1700000000011'
+      sourceHandle: source
+      target: '1700000000012'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    viewport:
+      x: 0
+      y: 0
+      zoom: 0.6
